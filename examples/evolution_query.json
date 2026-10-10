@@ -1,0 +1,62 @@
+{
+  "question": "Which analysis workflow?",
+  "key": "analysis.workflow",
+  "at": "2026-10-12T09:00:00+08:00",
+  "event": "incident_analysis",
+  "space": {
+    "namespace": "demo-network",
+    "entities": [
+      "road-1"
+    ],
+    "relations": [
+      {
+        "source": "road-2",
+        "predicate": "upstream_of",
+        "target": "road-1"
+      }
+    ]
+  },
+  "phase": "growth",
+  "state": {
+    "capacity": "reduced",
+    "queue": "growing"
+  },
+  "observations": [
+    {
+      "id": "new-flow-1",
+      "source": "gantry",
+      "modality": "time_series",
+      "namespace": "demo-network",
+      "entity": "road-1",
+      "metric": "flow",
+      "value": 100,
+      "unit": "vehicles/min",
+      "observed_at": "2026-10-12T09:00:00+08:00",
+      "provenance": "synthetic:new-flow-1"
+    },
+    {
+      "id": "new-flow-2",
+      "source": "counter",
+      "modality": "time_series",
+      "namespace": "demo-network",
+      "entity": "road-1",
+      "metric": "flow",
+      "value": 102,
+      "unit": "vehicles/min",
+      "observed_at": "2026-10-12T09:00:00+08:00",
+      "provenance": "synthetic:new-flow-2"
+    },
+    {
+      "id": "new-event",
+      "source": "event-feed",
+      "modality": "event_feed",
+      "namespace": "demo-network",
+      "entity": "road-1",
+      "metric": "event_type",
+      "value": "incident",
+      "unit": "category",
+      "observed_at": "2026-10-12T09:00:00+08:00",
+      "provenance": "synthetic:new-event"
+    }
+  ]
+}

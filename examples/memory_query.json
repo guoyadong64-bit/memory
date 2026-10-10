@@ -1,0 +1,5 @@
+{
+  "question": "项目报告用什么格式？",
+  "key": "report.format",
+  "conditions": {"project": "demo"}
+}

@@ -1,0 +1,36 @@
+[
+  {
+    "id": "demo_region_a_morning",
+    "key": "analysis.workflow",
+    "question": "如何开展拥堵分析？",
+    "answer": "先校验数据采样间隔和完整性，再调用分析模型。",
+    "conditions": {"sampling": "5min"},
+    "source": "人工编写的流程演示数据，不代表真实交通验证结果",
+    "verified": true,
+    "kind": "experience",
+    "time": {
+      "event_at": "2026-10-09T08:30:00+08:00",
+      "applicable_from": "2026-10-01T00:00:00+08:00",
+      "applicable_until": "2026-11-01T00:00:00+08:00",
+      "weekdays": [0, 1, 2, 3, 4],
+      "local_start_minute": 480,
+      "local_end_minute": 600,
+      "utc_offset_minutes": 480
+    },
+    "space": {"namespace": "demo-network", "entities": ["region-A"]},
+    "event": "congestion_analysis",
+    "action": "校验数据 → 调用分析模型",
+    "outcome": "演示：流程校验通过"
+  },
+  {
+    "id": "demo_region_b",
+    "key": "analysis.workflow",
+    "question": "如何开展拥堵分析？",
+    "answer": "区域 B 的演示流程。",
+    "source": "人工编写的反例，用于测试空间过滤",
+    "verified": true,
+    "kind": "experience",
+    "space": {"namespace": "demo-network", "entities": ["region-B"]},
+    "event": "congestion_analysis"
+  }
+]

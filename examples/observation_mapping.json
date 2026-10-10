@@ -1,0 +1,20 @@
+{
+  "source": "gantry",
+  "modality": "time_series",
+  "namespace": "demo-network",
+  "metric": "flow",
+  "input_unit": "vehicles/hour",
+  "output_unit": "vehicles/min",
+  "scale": 0.016666666666666666,
+  "entity_aliases": {
+    "G001": "road-1"
+  },
+  "fields": {
+    "id": "row_id",
+    "entity": "gantry_id",
+    "value": "flow_per_hour",
+    "observed_at": "time",
+    "provenance": "uri",
+    "unit": "unit"
+  }
+}

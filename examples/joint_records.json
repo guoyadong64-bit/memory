@@ -1,0 +1,182 @@
+[
+  {
+    "key": "observation.review",
+    "answer": "先核验来源、单位和观测时间，再检查多源一致性。",
+    "source": "Synthetic mechanism example; not real traffic validation",
+    "verified": true,
+    "kind": "experience",
+    "event": "incident_review",
+    "action": "review observations",
+    "outcome": "review completed",
+    "time": {
+      "local_start_minute": 480,
+      "local_end_minute": 600,
+      "utc_offset_minutes": 480
+    },
+    "space": {
+      "namespace": "demo-network",
+      "entities": [
+        "road-1"
+      ]
+    },
+    "required_state": {
+      "capacity": "reduced"
+    },
+    "evidence_requirements": [
+      {
+        "metric": "flow",
+        "unit": "vehicles/min",
+        "minimum": 80,
+        "maximum": 120,
+        "min_sources": 2,
+        "conflict_tolerance": 5
+      }
+    ],
+    "id": "joint_seed",
+    "question": "核验监测",
+    "evolution": {
+      "namespace": "demo-network",
+      "case_id": "joint_seed-case",
+      "stages": [
+        {
+          "id": "entry",
+          "phase": "growth",
+          "at": "2026-10-08T09:00:00+08:00",
+          "state": {
+            "queue": "growing"
+          },
+          "action": "review observations"
+        },
+        {
+          "id": "result",
+          "phase": "stable",
+          "at": "2026-10-08T09:20:00+08:00",
+          "state": {
+            "queue": "stable"
+          },
+          "outcome": "synthetic review completed"
+        }
+      ]
+    }
+  },
+  {
+    "key": "observation.review",
+    "answer": "先核验来源、单位和观测时间，再检查多源一致性。",
+    "source": "Synthetic mechanism example; not real traffic validation",
+    "verified": true,
+    "kind": "experience",
+    "event": "incident_review",
+    "action": "review observations",
+    "outcome": "review completed",
+    "time": {
+      "local_start_minute": 480,
+      "local_end_minute": 600,
+      "utc_offset_minutes": 480
+    },
+    "space": {
+      "namespace": "demo-network",
+      "entities": [
+        "road-1"
+      ]
+    },
+    "required_state": {
+      "capacity": "reduced"
+    },
+    "evidence_requirements": [
+      {
+        "metric": "flow",
+        "unit": "vehicles/min",
+        "minimum": 80,
+        "maximum": 120,
+        "min_sources": 2,
+        "conflict_tolerance": 5
+      }
+    ],
+    "id": "joint_neighbor",
+    "question": "多源一致性审查",
+    "evolution": {
+      "namespace": "demo-network",
+      "case_id": "joint_neighbor-case",
+      "stages": [
+        {
+          "id": "entry",
+          "phase": "growth",
+          "at": "2026-10-09T09:00:00+08:00",
+          "state": {
+            "queue": "growing"
+          },
+          "action": "review observations"
+        },
+        {
+          "id": "result",
+          "phase": "stable",
+          "at": "2026-10-09T09:20:00+08:00",
+          "state": {
+            "queue": "stable"
+          },
+          "outcome": "synthetic review completed"
+        }
+      ]
+    }
+  },
+  {
+    "key": "observation.review",
+    "answer": "先核验来源、单位和观测时间，再检查多源一致性。",
+    "source": "Synthetic mechanism example; not real traffic validation",
+    "verified": true,
+    "kind": "experience",
+    "event": "incident_review",
+    "action": "review observations",
+    "outcome": "review completed",
+    "time": {
+      "local_start_minute": 480,
+      "local_end_minute": 600,
+      "utc_offset_minutes": 480
+    },
+    "space": {
+      "namespace": "demo-network",
+      "entities": [
+        "road-1"
+      ]
+    },
+    "required_state": {
+      "capacity": "reduced"
+    },
+    "evidence_requirements": [
+      {
+        "metric": "flow",
+        "unit": "vehicles/min",
+        "minimum": 80,
+        "maximum": 120,
+        "min_sources": 2,
+        "conflict_tolerance": 5
+      }
+    ],
+    "id": "joint_wrong_phase",
+    "question": "核验监测",
+    "evolution": {
+      "namespace": "demo-network",
+      "case_id": "joint_wrong_phase-case",
+      "stages": [
+        {
+          "id": "entry",
+          "phase": "recovery",
+          "at": "2026-10-09T09:00:00+08:00",
+          "state": {
+            "queue": "shrinking"
+          },
+          "action": "review observations"
+        },
+        {
+          "id": "result",
+          "phase": "stable",
+          "at": "2026-10-09T09:20:00+08:00",
+          "state": {
+            "queue": "stable"
+          },
+          "outcome": "synthetic review completed"
+        }
+      ]
+    }
+  }
+]

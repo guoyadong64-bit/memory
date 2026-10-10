@@ -1,0 +1,12 @@
+[
+  {
+    "key": "report.format",
+    "question": "项目报告用什么格式？",
+    "answer": "本次会话的报告使用 PDF；这只是临时要求。",
+    "conditions": {"project": "demo"},
+    "source": "演示用户本次会话的明确要求",
+    "verified": true,
+    "scope": "short",
+    "session_id": "demo-session"
+  }
+]

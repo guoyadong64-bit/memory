@@ -1,0 +1,42 @@
+{
+  "question": "核验监测",
+  "at": "2026-10-12T09:00:00+08:00",
+  "space": {
+    "namespace": "demo-network",
+    "entities": [
+      "road-1"
+    ]
+  },
+  "event": "incident_review",
+  "phase": "growth",
+  "state": {
+    "queue": "growing",
+    "capacity": "reduced"
+  },
+  "observations": [
+    {
+      "id": "gantry",
+      "source": "gantry",
+      "modality": "series",
+      "namespace": "demo-network",
+      "entity": "road-1",
+      "metric": "flow",
+      "value": 100,
+      "unit": "vehicles/min",
+      "observed_at": "2026-10-12T09:00:00+08:00",
+      "provenance": "synthetic:gantry"
+    },
+    {
+      "id": "counter",
+      "source": "counter",
+      "modality": "series",
+      "namespace": "demo-network",
+      "entity": "road-1",
+      "metric": "flow",
+      "value": 102,
+      "unit": "vehicles/min",
+      "observed_at": "2026-10-12T09:00:00+08:00",
+      "provenance": "synthetic:counter"
+    }
+  ]
+}

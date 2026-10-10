@@ -1,0 +1,14 @@
+{
+  "question": "如何开展拥堵分析？",
+  "key": "analysis.workflow",
+  "conditions": {"sampling": "5min"},
+  "at": "2026-10-12T08:30:00+08:00",
+  "space": {
+    "namespace": "demo-network",
+    "entities": ["road-1"],
+    "relations": [
+      {"source": "road-1", "predicate": "within", "target": "region-A"}
+    ]
+  },
+  "event": "congestion_analysis"
+}

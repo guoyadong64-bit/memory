@@ -1,0 +1,183 @@
+[
+  {
+    "id": "evolution_growth",
+    "key": "analysis.workflow",
+    "question": "Which analysis workflow?",
+    "answer": "Validate upstream flow and event observations before invoking the congestion analysis model.",
+    "source": "Synthetic workflow demonstration; not real traffic validation",
+    "verified": true,
+    "kind": "experience",
+    "event": "incident_analysis",
+    "space": {
+      "namespace": "demo-network",
+      "entities": [
+        "road-1"
+      ],
+      "relations": [
+        {
+          "source": "road-2",
+          "predicate": "upstream_of",
+          "target": "road-1"
+        }
+      ]
+    },
+    "required_state": {
+      "capacity": "reduced"
+    },
+    "evidence_requirements": [
+      {
+        "metric": "flow",
+        "unit": "vehicles/min",
+        "minimum": 80,
+        "maximum": 120,
+        "min_sources": 2,
+        "conflict_tolerance": 5
+      },
+      {
+        "metric": "event_type",
+        "unit": "category",
+        "equals": "incident"
+      }
+    ],
+    "observations": [
+      {
+        "id": "old-flow",
+        "source": "gantry",
+        "modality": "time_series",
+        "namespace": "demo-network",
+        "entity": "road-1",
+        "metric": "flow",
+        "value": 100,
+        "unit": "vehicles/min",
+        "observed_at": "2026-10-11T09:00:00+08:00",
+        "provenance": "synthetic:old-flow"
+      },
+      {
+        "id": "old-event",
+        "source": "event-feed",
+        "modality": "event_feed",
+        "namespace": "demo-network",
+        "entity": "road-1",
+        "metric": "event_type",
+        "value": "incident",
+        "unit": "category",
+        "observed_at": "2026-10-11T09:00:00+08:00",
+        "provenance": "synthetic:old-event"
+      }
+    ],
+    "evolution": {
+      "namespace": "demo-network",
+      "case_id": "historical-incident-1",
+      "stages": [
+        {
+          "id": "growth",
+          "phase": "growth",
+          "at": "2026-10-11T09:00:00+08:00",
+          "state": {
+            "queue": "growing"
+          },
+          "action": "validate upstream evidence",
+          "observation_ids": [
+            "old-flow",
+            "old-event"
+          ]
+        },
+        {
+          "id": "recovery",
+          "phase": "recovery",
+          "at": "2026-10-11T09:20:00+08:00",
+          "state": {
+            "queue": "shrinking"
+          },
+          "outcome": "Synthetic workflow completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "evolution_recovery",
+    "key": "analysis.workflow",
+    "question": "Which analysis workflow?",
+    "answer": "Validate recovery observations and compare the current flow against the recovery baseline.",
+    "source": "Synthetic workflow demonstration; not real traffic validation",
+    "verified": true,
+    "kind": "experience",
+    "event": "incident_analysis",
+    "space": {
+      "namespace": "demo-network",
+      "entities": [
+        "road-1"
+      ],
+      "relations": [
+        {
+          "source": "road-2",
+          "predicate": "upstream_of",
+          "target": "road-1"
+        }
+      ]
+    },
+    "required_state": {
+      "capacity": "restored"
+    },
+    "evidence_requirements": [
+      {
+        "metric": "flow",
+        "unit": "vehicles/min",
+        "minimum": 180,
+        "maximum": 220,
+        "min_sources": 2,
+        "conflict_tolerance": 5
+      }
+    ],
+    "observations": [
+      {
+        "id": "old-flow",
+        "source": "gantry",
+        "modality": "time_series",
+        "namespace": "demo-network",
+        "entity": "road-1",
+        "metric": "flow",
+        "value": 100,
+        "unit": "vehicles/min",
+        "observed_at": "2026-10-11T09:00:00+08:00",
+        "provenance": "synthetic:old-flow"
+      },
+      {
+        "id": "old-event",
+        "source": "event-feed",
+        "modality": "event_feed",
+        "namespace": "demo-network",
+        "entity": "road-1",
+        "metric": "event_type",
+        "value": "incident",
+        "unit": "category",
+        "observed_at": "2026-10-11T09:00:00+08:00",
+        "provenance": "synthetic:old-event"
+      }
+    ],
+    "evolution": {
+      "namespace": "demo-network",
+      "case_id": "historical-incident-1",
+      "stages": [
+        {
+          "id": "recovery",
+          "phase": "recovery",
+          "at": "2026-10-11T09:20:00+08:00",
+          "state": {
+            "queue": "shrinking"
+          },
+          "action": "check recovery baseline"
+        },
+        {
+          "id": "stable",
+          "phase": "stable",
+          "at": "2026-10-11T09:40:00+08:00",
+          "state": {
+            "queue": "normal"
+          },
+          "outcome": "Synthetic recovery analysis completed"
+        }
+      ]
+    }
+  }
+]

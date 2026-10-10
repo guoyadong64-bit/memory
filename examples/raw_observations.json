@@ -1,0 +1,10 @@
+[
+  {
+    "row_id": "001",
+    "gantry_id": "G001",
+    "flow_per_hour": 6000,
+    "time": "2026-10-12T09:00:00+08:00",
+    "uri": "synthetic:gantry/001",
+    "unit": "vehicles/hour"
+  }
+]
