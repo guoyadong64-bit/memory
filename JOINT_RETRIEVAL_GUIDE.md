@@ -54,6 +54,6 @@ python -m memory_agent --mode mock --store runtime\memory_agent\joint_demo.sqlit
 
 示例故意省略查询任务键：平面模式直接召回 joint_seed，超图模式还通过共享空间、事件、状态和证据要求召回 joint_neighbor；joint_wrong_phase 不满足增长阶段条件，被两模式共同排除。示例是机制检查，没有定义完整的正确答案集合，不能将“多召回一条”直接视为性能更好。mock 仍只对精确问题演示直接复用。
 
-对实际任务，固定底座模型、向量模型、证据、Top-K、硬约束与预算，比较 flat 与 hypergraph；加入关闭邻域扩展、移除阶段绑定、关闭 Jev 等消融。评估正确经历 Recall@K／Precision@K、错误复用率、下游回答或任务成功率、端到端耗时与调用成本。测试集需要同时含有应扩展和不应扩展的样本，避免只对新机制友好的合成案例。当前实现与测试证明机制按预期工作，不证明已具备论文新颖性或性能优势。
+当前主对比使用 Mem0 官方开源 SDK，运行方式见 [Mem0 对比实验操作](FINDINGDORY_MEM0_GUIDE.md)。固定底座模型、向量模型、输入证据、回答提示词、Top-K 与预算；另可使用关闭邻域扩展、移除阶段绑定、关闭 Jev 等消融。记录正确经历 Recall@K／Precision@K、错误复用率、下游回答或任务成功率、端到端耗时与调用成本。
 
-分层扁平图：[结构与检索](docs/figures/hypergraph-memory-layered-flat.md)。
+分层扁平图：[结构与检索](docs/figures/hypergraph-memory-paper-flat.md)。

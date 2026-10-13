@@ -4,6 +4,7 @@ import json
 
 from .models import Query, Record
 from .spatiotemporal import evidence_check
+from .recall import record_match, hint_score
 
 
 def nid(kind, value):
@@ -15,6 +16,8 @@ def encoded(kind, value):
 
 
 def context_coverage(record: Record, query: Query) -> float:
+    if query.purpose == "recall" and query.recall_plan:
+        return record_match(record, query.recall_plan)
     requested = {"task":query.key is not None,"time":query.at is not None,
         "space":query.space is not None,"event":query.event is not None,
         "phase":query.phase is not None,"state":bool(query.state),
@@ -56,7 +59,8 @@ def binding(db, record: Record, query: Query) -> dict:
                     break
                 reached |= added
             anchors["space"] = {encoded("space",[record.space.namespace,x])
-                                 for x in record.space.entities if x in reached}
+                                 for x in record.space.entities if x in reached and
+                                 not (query.purpose == "recall" and x == query.space.namespace)}
     for role in ("event","action","outcome"):
         if value := getattr(record,role):
             ids = {nid(role,value)}
@@ -111,12 +115,36 @@ def binding(db, record: Record, query: Query) -> dict:
             transitions.append(eid)
             trajectory_ok &= {process,before,after,transition} <= groups.get(eid,{"nodes":{}})["nodes"].keys()
     episode_ok = episode["kind"] == "episode" and required <= episode["nodes"].keys()
+    identity_ok = True
+    entity_hint = (query.recall_plan.entity_hint or query.recall_plan.anchor_hint or
+                   query.recall_plan.location_hint) if query.recall_plan else None
+    for entity in record.entities:
+        identity = encoded("entity", [entity.namespace, entity.id])
+        required.add(identity)
+        identity_ok &= identity in episode["nodes"]
+        names = " ".join([entity.name, *[x.text for x in entity.labels if x.confidence >= .8]])
+        if entity_hint and hint_score(entity_hint, entity.id, names) >= .5:
+            anchors.setdefault("identity", set()).add(identity)
+        for label in entity.labels:
+            lid = encoded("entity_label", label.model_dump(mode="json"))
+            expected = {identity, lid, *[encoded("observation", next(o for o in record.observations
+                        if o.id == oid).model_dump(mode="json")) for oid in label.observation_ids]}
+            identity_ok &= expected <= groups.get("identity:"+identity+":"+lid, {"nodes":{}})["nodes"].keys()
+    for role in record.role_bindings:
+        rid = encoded("role", [record.scope,record.session_id,record.id,role.model_dump(mode="json")])
+        entity = next(e for e in record.entities if e.id == role.entity_id)
+        expected = {encoded("entity", [entity.namespace, entity.id]), rid,
+            *[encoded("observation", next(o for o in record.observations if o.id == oid).model_dump(mode="json"))
+              for oid in role.observation_ids]}
+        identity_ok &= expected <= groups.get("role:"+rid, {"nodes":{}})["nodes"].keys()
+    episode_ok &= identity_ok
     matched = {role:sorted(ids & episode["nodes"].keys()) for role,ids in anchors.items()}
     # Only query-compatible context nodes can support bounded neighbourhood expansion.
-    expand_types = {"space","event","state","time","requirement","stage"}
+    expand_types = {"space","event","state","time","requirement","stage","entity"}
     shared = {node_id:episode["nodes"][node_id][0] for ids in matched.values() for node_id in ids
               if episode["nodes"][node_id][0] in expand_types}
-    return {"episode_bound":episode_ok and observations_bound,"observations_bound":bool(observations_bound),
+    return {"episode_bound":episode_ok and observations_bound,"identity_bound":bool(identity_ok),
+            "observations_bound":bool(observations_bound),
             "trajectory_bound":bool(trajectory_ok),
             "matched_roles":matched,"matched_nodes":shared,
             "entry_edge":entry_edge,"transition_edges":transitions,

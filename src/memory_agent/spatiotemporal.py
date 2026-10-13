@@ -75,7 +75,7 @@ def spatial_score(record: Record, query: Query) -> float:
         return -1.0
     facts = {(r.source,r.predicate,r.target) for r in current.relations}
     required = {(r.source,r.predicate,r.target) for r in record.space.relations}
-    if not required.issubset(facts):
+    if query.purpose != "recall" and not required.issubset(facts):
         return -1.0
     scope = set(record.space.entities)
     if scope.intersection(current.entities):
@@ -92,10 +92,10 @@ def spatial_score(record: Record, query: Query) -> float:
 
 def context_rejection(record: Record, query: Query) -> str | None:
     expected = (record.evolution.stages[0].state if record.evolution else {}) | record.required_state
-    if any(query.state.get(k) != v for k,v in expected.items()):
+    if query.purpose != "recall" and any(query.state.get(k) != v for k,v in expected.items()):
         return "state_mismatch_or_missing"
     if record.evolution:
-        if query.phase != record.evolution.stages[0].phase:
+        if query.purpose != "recall" and query.phase != record.evolution.stages[0].phase:
             return "phase_mismatch_or_missing"
         if query.at is None or record.evolution.stages[-1].at > query.at:
             return "historical_outcome_not_yet_available"

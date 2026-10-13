@@ -18,10 +18,16 @@ def tokens(text: str) -> list[str]:
 
 def record_text(record: Record) -> str:
     # Scope/time applicability remain hard gates, never inferred from a vector.
-    return json.dumps({"question":record.question,"task":record.key,"event":record.event,
+    value = {"question":record.question,"task":record.key,"event":record.event,
         "state":record.required_state,"action":record.action,"outcome":record.outcome,
         "entry":record.evolution.stages[0].model_dump(mode="json",exclude={"at","observation_ids"})
-        if record.evolution else None},ensure_ascii=False,sort_keys=True)
+        if record.evolution else None}
+    if record.entities:
+        value["identities"] = [{"id":e.id,"name":e.name,"attributes":e.attributes,
+            "labels":[l.text for l in e.labels if l.confidence>=.8]} for e in record.entities]
+    if record.role_bindings:
+        value["roles"] = sorted({(b.role,b.entity_id) for b in record.role_bindings if b.confidence>=.8})
+    return json.dumps(value,ensure_ascii=False,sort_keys=True)
 
 
 def query_text(query: Query) -> str:
@@ -33,7 +39,9 @@ def lexical_scores(query: Query, records: list[Record]) -> dict[str,float]:
     # Do not tokenize JSON field names: those would spuriously match every record.
     documents = [tokens(r.question + " " + r.key + " " + (r.event or "") + " " +
                        " ".join(r.required_state.values()) + " " +
-                       (r.evolution.stages[0].phase if r.evolution else "")) for r in records]
+                       (r.evolution.stages[0].phase if r.evolution else "") + " " +
+                       " ".join(e.name + " " + " ".join(l.text for l in e.labels if l.confidence>=.8)
+                                for e in r.entities)) for r in records]
     q = tokens(query.question)
     counts = [Counter(d) for d in documents]
     frequency = Counter(t for d in counts for t in d)

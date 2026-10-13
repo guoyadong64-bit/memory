@@ -13,6 +13,8 @@ class Settings(BaseModel):
     llm_key: str = Field(default="", repr=False)
     llm_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o-mini"
+    vision_model: str = ""
+    llm_thinking: bool = False
     understanding_model: str = ""
     answer_model: str = ""
     jev_key: str = Field(default="", repr=False)
@@ -39,6 +41,8 @@ class Settings(BaseModel):
         names = {
             "mode": "MEMORY_AGENT_MODE", "llm_key": "MEMORY_LLM_API_KEY",
             "llm_url": "MEMORY_LLM_BASE_URL", "llm_model": "MEMORY_LLM_MODEL",
+            "vision_model": "MEMORY_VISION_MODEL",
+            "llm_thinking": "MEMORY_LLM_ENABLE_THINKING",
             "understanding_model": "MEMORY_UNDERSTANDING_MODEL",
             "answer_model": "MEMORY_ANSWER_MODEL", "jev_key": "TYPESAFE_API_KEY",
             "jev_url": "TYPESAFE_BASE_URL", "jev_model": "TYPESAFE_MODEL",

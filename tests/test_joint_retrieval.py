@@ -226,7 +226,7 @@ def test_schema_four_upgrade_keeps_record_payload(store):
     with loaded.connection() as db:
         assert db.execute("SELECT payload FROM records WHERE id=?",(r.id,)).fetchone()[0] == original
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert loaded.counts()["schema_version"] == 5
+    assert loaded.counts()["schema_version"] == 6
 
 
 def test_historical_observation_requires_its_own_source_time_and_space_binding(store):

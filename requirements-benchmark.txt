@@ -1,0 +1,2 @@
+# Optional official baseline dependency; install in a separate environment.
+mem0ai==2.2.1

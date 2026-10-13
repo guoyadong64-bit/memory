@@ -138,7 +138,8 @@ class Evolution(BaseModel):
     model_config = ConfigDict(extra="forbid")
     namespace: str = Field(min_length=1)
     case_id: str = Field(min_length=1)
-    stages: list[Stage] = Field(min_length=2,max_length=100)
+    # A single evidenced action is a partial event, not a fabricated full cycle.
+    stages: list[Stage] = Field(min_length=1,max_length=100)
     observation_alignment_seconds: int = Field(default=300,ge=0,le=86400)
 
     @model_validator(mode="after")
@@ -148,6 +149,54 @@ class Evolution(BaseModel):
         if any(a.at >= b.at for a,b in zip(self.stages,self.stages[1:])):
             raise ValueError("Trajectory stages must be strictly chronological.")
         return self
+
+
+class EntityLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=160)
+    confidence: float = Field(ge=0, le=1)
+    observation_ids: list[str] = Field(min_length=1)
+
+
+class MemoryEntity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1)
+    namespace: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    kind: Literal["object", "place", "agent"]
+    labels: list[EntityLabel] = Field(default_factory=list)
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
+class RoleBinding(BaseModel):
+    """Directed event role, with explicit image evidence rather than free text."""
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["object", "actor", "source", "destination", "visible"]
+    entity_id: str = Field(min_length=1)
+    observation_ids: list[str] = Field(min_length=1)
+    stage_id: str | None = None
+    confidence: float = Field(ge=0, le=1)
+    basis: Literal["observed", "linked"] = "observed"
+
+
+class RecallTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    record_id: str
+    entity_id: str
+    role: Literal["object", "source", "destination", "visible"]
+    frame_index: int | None = None
+    observation_ids: list[str] = Field(default_factory=list)
+
+
+class RecallResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    record_ids: list[str] = Field(default_factory=list)
+    target_record_ids: list[str] = Field(default_factory=list)
+    anchor_record_ids: list[str] = Field(default_factory=list)
+    entity_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    targets: list[RecallTarget] = Field(default_factory=list)
+    complete: bool = False
 
 
 class Record(BaseModel):
@@ -173,6 +222,8 @@ class Record(BaseModel):
     outcome: str | None = Field(default=None,min_length=1)
     observations: list[Observation] = Field(default_factory=list,max_length=1000)
     evolution: Evolution | None = None
+    entities: list[MemoryEntity] = Field(default_factory=list)
+    role_bindings: list[RoleBinding] = Field(default_factory=list)
     required_state: dict[str,str] = Field(default_factory=dict)
     evidence_requirements: list[EvidenceRequirement] = Field(default_factory=list,max_length=50)
 
@@ -181,6 +232,30 @@ class Record(BaseModel):
         indexed = {o.id:o for o in self.observations}
         if len(indexed) != len(self.observations):
             raise ValueError("Observation IDs must be unique within a record.")
+        entities = {e.id: e for e in self.entities}
+        if len(entities) != len(self.entities):
+            raise ValueError("Entity IDs must be unique within a record.")
+        for entity in self.entities:
+            for label in entity.labels:
+                if any(oid not in indexed or indexed[oid].namespace != entity.namespace
+                       for oid in label.observation_ids):
+                    raise ValueError("Entity labels require same-namespace observation evidence.")
+        stages = {s.id: s for s in self.evolution.stages} if self.evolution else {}
+        for role in self.role_bindings:
+            if role.entity_id not in entities:
+                raise ValueError("Role binding refers to an unknown entity.")
+            if role.role == "actor" and entities[role.entity_id].kind != "agent":
+                raise ValueError("Actor role requires an agent entity.")
+            if role.role == "object" and entities[role.entity_id].kind != "object":
+                raise ValueError("Object role requires an object entity.")
+            if any(oid not in indexed or indexed[oid].namespace != entities[role.entity_id].namespace
+                   for oid in role.observation_ids):
+                raise ValueError("Role binding requires same-namespace evidence.")
+            if role.stage_id is not None and role.stage_id not in stages:
+                raise ValueError("Role binding refers to an unknown event stage.")
+            field = {"object":"object_id","source":"source_id","destination":"target_id"}.get(role.role)
+            if role.stage_id is not None and field and stages[role.stage_id].state.get(field) != role.entity_id:
+                raise ValueError("Role binding contradicts its event stage state.")
         if self.evolution:
             if any(k in self.evolution.stages[0].state and self.evolution.stages[0].state[k] != v
                    for k,v in self.required_state.items()):
@@ -223,14 +298,16 @@ class Node(BaseModel):
     id: str
     kind: Literal["intent", "condition", "answer", "evidence", "feedback",
                   "time", "space", "spatial_relation", "event", "action", "outcome",
-                  "observation", "source", "process", "stage", "state", "requirement", "transition"]
+                  "observation", "source", "process", "stage", "state", "requirement", "transition",
+                  "entity", "entity_label", "role"]
     value: str
 
 
 class Edge(BaseModel):
     id: str
     kind: Literal["episode", "family", "invalidation", "spatial_relation",
-                  "observation", "stage_evidence", "state_transition", "process"]
+                  "observation", "stage_evidence", "state_transition", "process",
+                  "entity_identity", "role_binding"]
     members: list[str]
     record_ids: list[str]
 
@@ -242,9 +319,39 @@ class Graph(BaseModel):
     edges: dict[str, Edge] = Field(default_factory=dict)
 
 
+class RecallPlan(BaseModel):
+    """Declarative historical retrieval operators; never contains answers or goal labels."""
+    model_config = ConfigDict(extra="forbid")
+    goal: Literal["entity", "source", "destination", "uninteracted"] = "entity"
+    entity_hint: str | None = None
+    location_hint: str | None = None
+    anchor_hint: str | None = None
+    relation: Literal["any", "before", "after"] = "any"
+    offset: int = Field(default=1, ge=1, le=100)
+    ordinal: int | None = Field(default=None, ge=1, le=100)
+    latest: bool = False
+    all_targets: bool = False
+    visit_order: list[int] = Field(default_factory=list, max_length=100)
+    previous_day: bool = False
+    requires_geometry: bool = False
+
+    @field_validator("visit_order")
+    @classmethod
+    def positive_order(cls, value):
+        if any(type(n) is not int or n < 1 for n in value):
+            raise ValueError("Visit order uses positive one-based ordinals")
+        return value
+
+
 class Query(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1)
+    # Recall historical evidence without treating its initial state as a current prerequisite.
+    purpose: Literal["application", "recall"] = "application"
+    output_kind: Literal["text", "goal_frames"] = "text"
+    recall_plan: RecallPlan | None = None
+    # Generated over the full eligible history before Top-K; never model-supplied.
+    recall_resolution: RecallResolution | None = None
     key: str | None = None
     conditions: dict[str, str] = Field(default_factory=dict)
     session_id: str | None = Field(default=None, min_length=1, max_length=128)

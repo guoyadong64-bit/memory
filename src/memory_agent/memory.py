@@ -13,6 +13,7 @@ from .models import Edge, Graph, Node, Query, Record, Result, ValidationEvidence
 from .spatiotemporal import context_key, context_rejection, ranking_context, evidence_check
 from .semantic import lexical_scores, query_text, record_text, validate_vectors, vector_scores
 from .retrieval import binding, context_coverage
+from .recall import graph_plan
 
 
 def terms(text: str) -> set[str]:
@@ -77,14 +78,14 @@ class HypergraphMemory:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, 4, 5):
+            if version not in (0, 1, 2, 3, 4, 5, 6):
                 raise ValueError("Unsupported memory database schema version.")
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
-            if version < 4:
+            if version < 6:
                 for row in db.execute("SELECT payload FROM records").fetchall():
                     self._index_context(db, Record.model_validate_json(row[0]))
-            db.execute("PRAGMA user_version=5")
+            db.execute("PRAGMA user_version=6")
 
     @contextmanager
     def connection(self, write: bool = False):
@@ -145,7 +146,34 @@ class HypergraphMemory:
             if value:
                 members.append(self._node(db, kind, value))
         members += self._evolution_members(db, record)
+        members += self._identity_members(db, record)
         return list(dict.fromkeys(members))
+
+    def _identity_members(self, db, record: Record) -> list[str]:
+        def node(kind, value):
+            return self._node(db, kind, json.dumps(value, ensure_ascii=False, sort_keys=True))
+        observed = {o.id: node("observation", o.model_dump(mode="json")) for o in record.observations}
+        identities, members = {}, []
+        for entity in record.entities:
+            identity = node("entity", [entity.namespace, entity.id])
+            identities[entity.id] = identity
+            members.append(identity)
+            for label in entity.labels:
+                lid = node("entity_label", label.model_dump(mode="json"))
+                group = [identity, lid, *[observed[oid] for oid in label.observation_ids]]
+                self._edge(db, "identity:" + identity + ":" + lid, "entity_identity", group, [record.id])
+                members.extend(group)
+        for role in record.role_bindings:
+            rid = node("role", [record.scope, record.session_id, record.id, role.model_dump(mode="json")])
+            group = [identities[role.entity_id], rid, *[observed[oid] for oid in role.observation_ids]]
+            if record.evolution and role.stage_id:
+                process = node("process", [record.scope, record.session_id,
+                    record.evolution.namespace, record.evolution.case_id])
+                stage = next(s for s in record.evolution.stages if s.id == role.stage_id)
+                group.extend([process, node("stage", {"process": process, **stage.model_dump(mode="json")})])
+            self._edge(db, "role:" + rid, "role_binding", group, [record.id])
+            members.extend(group)
+        return members
 
     def _evolution_members(self, db, record: Record) -> list[str]:
         members, observations = [], {}
@@ -396,11 +424,14 @@ class HypergraphMemory:
         candidates = [r for r in candidates if r.scope == "short" or
                       (r.key,context_key(r)) not in local]
         report = {"strategy":strategy,"semantic_backend":"tfidf","fallback":None,
-                  "eligible_count":len(candidates),"filtered":filtered,"scores":{}}
+                  "eligible_count":len(candidates),"filtered":filtered,"scores":{},
+                  "query_plan": query.recall_plan.model_dump(mode="json") if query.recall_plan else None}
         if not candidates:
             return [],report
         semantic,backend,fallback = self._semantic(query,candidates,embedder,embedding_namespace)
         report.update(semantic_backend=backend,fallback=fallback)
+        planned_ids = set()
+        report["plan_evidence"] = None
         bound = {}
         if strategy == "hypergraph":
             with self.connection() as db:
@@ -413,6 +444,14 @@ class HypergraphMemory:
                 else:
                     usable.append(r)
             candidates = usable
+        if query.purpose == "recall" and query.recall_plan is not None:
+            # Execute the same explicit task constraints for both retrieval baselines.
+            # Hypergraph binding remains an additional structural check, not a different
+            # interpretation of the user's requested source/destination/ordinal.
+            report["plan_evidence"] = graph_plan(candidates, query)
+            planned_ids = set(report["plan_evidence"].get("record_ids", []))
+            if planned_ids and not report["plan_evidence"].get("warnings"):
+                candidates = [r for r in candidates if r.id in planned_ids]
         direct = {r.id for r in candidates if query.key is not None or semantic[r.id] > minimum_similarity}
         seeds = sorted((r for r in candidates if r.id in direct),
                        key=lambda r:semantic[r.id],reverse=True)[:max(1,top_k)]
@@ -429,7 +468,7 @@ class HypergraphMemory:
                     if len(types) >= 2:
                         paths.append({"seed_record_id":seed.id,"shared_node_ids":sorted(shared),
                                       "shared_types":sorted(types)})
-            if r.id not in direct and not paths:
+            if r.id not in direct and not paths and r.id not in planned_ids:
                 report["filtered"].append({"record_id":r.id,"reason":"no_semantic_or_joint_graph_match"})
                 continue
             coverage = context_coverage(r,query)
@@ -437,16 +476,23 @@ class HypergraphMemory:
             support = min(1.0,max((len(p["shared_types"])/4 for p in paths),default=0.0))
             graph_support = .5*coverage + .5*support if strategy == "hypergraph" else coverage
             total = .55*semantic[r.id] + .30*coverage + .15*graph_support
+            if r.id in planned_ids:
+                total += .45  # executed ordinal/relative evidence outranks mere semantic proximity
             score = self.retrieval_scores(r,query) | {
                 "semantic":round(semantic[r.id],6),"context_coverage":round(coverage,6),
                 "joint_graph_support":round(graph_support,6),"total":round(total,6),
-                "recall_route":"semantic_or_task" if r.id in direct else "joint_hyperedge_expansion",
+                "recall_route":"structured_plan" if r.id in planned_ids else
+                    "semantic_or_task" if r.id in direct else "joint_hyperedge_expansion",
                 "shared_paths":paths,"binding":bound.get(r.id)}
             report["scores"][r.id] = score
             expanded.append(r)
         expanded.sort(key=lambda r:(report["scores"][r.id]["total"],len(r.conditions),
                                    r.scope == "short",r.created_at),reverse=True)
-        chosen = expanded[:top_k]
+        planned_targets = len((report.get("plan_evidence") or {}).get("target_record_ids", []))
+        result_limit = min(100, max(top_k, planned_targets)) if (
+            query.recall_plan and query.recall_plan.all_targets and planned_ids and
+            not report["plan_evidence"].get("warnings")) else top_k
+        chosen = expanded[:result_limit]
         report["scores"] = {r.id:report["scores"][r.id] for r in chosen}
         return chosen,report
 
@@ -480,6 +526,7 @@ class HypergraphMemory:
                          conditions=old.conditions,source=source,verified=True,kind=old.kind,
                          time=old.time, space=old.space, event=old.event,
                          action=old.action, outcome=old.outcome,observations=old.observations,
+                         entities=old.entities, role_bindings=old.role_bindings,
                          evolution=old.evolution,required_state=old.required_state,
                          evidence_requirements=old.evidence_requirements)
             self._add(db,new)

@@ -1,0 +1,7 @@
+# Official A-mem-sys source is pinned in benchmarks/amem_adapter.py.
+# Install into runtime/amem-env; preserve the other benchmark environment.
+chromadb==1.5.9
+rank_bm25==0.2.2
+nltk==3.10.3
+litellm==1.105.0
+sentence-transformers==6.1.0

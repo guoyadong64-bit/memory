@@ -88,7 +88,7 @@ def test_persistence_graph_roles_and_schema_upgrade(store):
         db.execute("PRAGMA user_version=2")
     loaded = HypergraphMemory(store.path)
     assert loaded.retrieve(query())[0].model_dump() == r.model_dump()
-    assert loaded.counts()["schema_version"] == 5
+    assert loaded.counts()["schema_version"] == 6
     assert loaded.counts()["edge_types"]["spatial_relation"] == 1
     assert loaded.graph.version == 3
     nodes = loaded.graph.nodes
