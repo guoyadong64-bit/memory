@@ -105,8 +105,9 @@ def test_identity_conflicts_and_impossible_action_phase_are_rejected():
     with pytest.raises(ValueError, match="OBJECT -> AGENT"):
         VisualFrame.model_validate(reverse)
     missing = frame(description="The robot is carrying the cup.", interaction=None)
-    with pytest.raises(ValueError, match="interaction is null"):
-        VisualFrame.model_validate(missing)
+    incomplete = VisualFrame.model_validate(missing)
+    assert incomplete.interaction is None
+    assert incomplete.relations[0].predicate == "held_by"
     impossible = frame(phase="settled")
     impossible["relations"] = frame()["relations"]
     with pytest.raises(ValueError, match="cannot still be held_by"):

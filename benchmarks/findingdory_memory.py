@@ -157,26 +157,9 @@ class VisualFrame(BaseModel):
             if i.confidence >= MIN_CONFIDENCE and i.outcome and not supported:
                 raise ValueError("Placement outcome requires high-confidence visible on/inside support "
                                  "for the manipulated object; otherwise leave outcome null")
-        else:
-            # A verb anywhere in a scene does not establish manipulation by its agent:
-            # furniture can 'hold' objects, and an arm moving/occluding is not a grasp.
-            agents = [e for e in self.entities if e.kind == "agent"]
-            subjects = {term for e in agents for term in (e.id, e.name)}
-            if agents:
-                subjects.update({"robot", "robot arm", "gripper", "person", "human"})
-            explicit_holding = any(r.predicate == "held_by" and r.confidence >= MIN_CONFIDENCE
-                                   for r in self.relations)
-            subject_action = bool(subjects) and re.search(
-                r"\b(?:" + "|".join(re.escape(s) for s in sorted(subjects, key=len, reverse=True)) +
-                r")\b\s+(?:(?:is|are|was|has|had|continues to)\s+)?"
-                r"(?:(?:actively|currently|still|now)\s+)?"
-                r"(?:approach(?:es|ed|ing)?|grasp(?:s|ed|ing)?|lift(?:s|ed|ing)?|releas(?:e|es|ed|ing)|"
-                r"plac(?:e|es|ed|ing)|carry|carries|carried|carrying|hold(?:s|ing)?|held)\b",
-                self.description, re.I)
-            if explicit_holding or subject_action:
-                raise ValueError("Description/held_by explicitly identifies manipulation by an agent "
-                                 "but interaction is null; describe the evidenced phase with uncertainty "
-                                 "or correct the description")
+        # A visible held_by relation or action description remains useful evidence
+        # even when the temporal interaction phase is uncertain. Do not force the
+        # model to invent grasp/transport just to satisfy a schema constraint.
         return self
 
 
@@ -231,6 +214,42 @@ def frame_times(frames):
     return result
 
 
+def adjacent_settlement(previous: VisualFrame | None, current: VisualFrame) -> Interaction | None:
+    """Link an observed hold to an adjacent supported state without editing the image record.
+
+    The transition is a memory inference, not a VLM-labeled release. Requiring the
+    same object and actor, a visible open gripper, and one supported destination
+    prevents a static object-on-furniture relation from becoming a placement.
+    """
+    if previous is None or current.interaction is not None or current.frame_index != previous.frame_index + 1:
+        return None
+    prior = previous.interaction
+    if prior is None or prior.confidence < MIN_CONFIDENCE or prior.phase not in {"grasp", "transport"}:
+        return None
+    held = [r for r in previous.relations if r.source == prior.object_id and
+            r.predicate == "held_by" and r.target == prior.actor_id and r.confidence >= MIN_CONFIDENCE]
+    if not held or not prior.actor_id:
+        return None
+    entities = {e.id: e for e in current.entities}
+    if prior.object_id not in entities or entities.get(prior.actor_id, None) is None or \
+            entities[prior.actor_id].kind != "agent":
+        return None
+    if any(r.source == prior.object_id and r.predicate == "held_by" and
+           r.confidence >= MIN_CONFIDENCE for r in current.relations):
+        return None
+    supports = [r for r in current.relations if r.source == prior.object_id and
+                r.predicate in {"on", "inside"} and r.confidence >= MIN_CONFIDENCE]
+    if len({r.target for r in supports}) != 1:
+        return None
+    if not re.search(r"\b(?:gripper|robot(?:ic)? arm)\b.{0,65}\b(?:open|empty|released)\b",
+                     current.description, re.I):
+        return None
+    return Interaction(id=prior.id, object_id=prior.object_id, actor_id=prior.actor_id,
+                       phase="settled", target_id=supports[0].target,
+                       confidence=min(prior.confidence, held[0].confidence,
+                                      min(r.confidence for r in supports)))
+
+
 def structured_records(ep, raw_frames):
     frames = validate_batch(raw_frames, [x["frame_index"] for x in raw_frames])
     if [f.frame_index for f in frames] != sorted({f.frame_index for f in frames}):
@@ -239,37 +258,45 @@ def structured_records(ep, raw_frames):
     records = []
     groups = defaultdict(list)
     previous_segment = None
+    inferred_settlements = {}
     phase_order = {phase:n for n,phase in enumerate(["approach", "grasp", "transport", "release", "settled"])}
     evidence = {}
-    for f in frames:
+    for index, original in enumerate(frames):
+        inferred = adjacent_settlement(frames[index - 1] if index else None, original)
+        f = (original.model_copy(update={"interaction": inferred}) if inferred else original)
+        if inferred:
+            inferred_settlements[f.frame_index] = frames[index - 1].frame_index
         at, basis = times[f.frame_index]
         i = f.interaction if f.interaction and f.interaction.confidence >= MIN_CONFIDENCE else None
-        payload = f.model_dump(mode="json") | {"time_basis": basis, "frame_indices": [f.frame_index]}
+        observed_i = (original.interaction if original.interaction and
+                      original.interaction.confidence >= MIN_CONFIDENCE else None)
+        payload = original.model_dump(mode="json") | {"time_basis": basis, "frame_indices": [f.frame_index]}
         relations = [SpatialRelation(source=r.source, predicate=r.predicate, target=r.target)
                      for r in f.relations if r.confidence >= MIN_CONFIDENCE]
         # Provenance remains frame-bound even when a process later groups frames.
         observation = Observation(id=f"{ep}_image_{f.frame_index}", source=f"{ep}/frames/{f.frame_index:03d}.jpg",
-            modality="image", namespace=ep, entity=i.object_id if i else ep,
+            modality="image", namespace=ep, entity=observed_i.object_id if observed_i else ep,
             metric="visual_state", value=json.dumps(payload, ensure_ascii=False), unit="description",
             observed_at=at, provenance="VLM interpretation of this image; not independently verified",
-            quality=i.confidence if i else .5)
+            quality=observed_i.confidence if observed_i else .5)
         evidence[f.frame_index] = observation
-        action = f"{i.actor_id or 'unknown_agent'}:{i.action}:{i.object_id}" if i and i.action else None
+        action = (f"{observed_i.actor_id or 'unknown_agent'}:{observed_i.action}:{observed_i.object_id}"
+                  if observed_i and observed_i.action else None)
         entities = memory_entities(ep, [f], evidence)
         roles = [RoleBinding(role="visible", entity_id=e.id,
                  observation_ids=[observation.id], confidence=.8) for e in entities]
-        if i and i.phase in {"grasp", "transport", "release", "settled"}:
-            roles.append(RoleBinding(role="object", entity_id=i.object_id,
-                                     observation_ids=[observation.id], confidence=i.confidence))
-            if i.actor_id:
-                roles.append(RoleBinding(role="actor", entity_id=i.actor_id,
-                                         observation_ids=[observation.id], confidence=i.confidence))
+        if observed_i and observed_i.phase in {"grasp", "transport", "release", "settled"}:
+            roles.append(RoleBinding(role="object", entity_id=observed_i.object_id,
+                                     observation_ids=[observation.id], confidence=observed_i.confidence))
+            if observed_i.actor_id:
+                roles.append(RoleBinding(role="actor", entity_id=observed_i.actor_id,
+                                         observation_ids=[observation.id], confidence=observed_i.confidence))
         records.append(Record(id=f"{ep}_frame_{f.frame_index}", key="findingdory.history",
             question=f"Frame {f.frame_index}; clock {f.clock}; {f.description}",
             answer=json.dumps(payload, ensure_ascii=False), source=observation.provenance + "; " + observation.source,
             verified=True, kind="experience", time=TemporalContext(event_at=at),
             space=SpatialContext(namespace=ep, entities=[ep, *[e.id for e in f.entities]], relations=relations),
-            event="visual_history", action=action, outcome=i.outcome if i else None,
+            event="visual_history", action=action, outcome=observed_i.outcome if observed_i else None,
             observations=[observation], entities=entities, role_bindings=roles))
         if i:
             # Model-written IDs are hypotheses, not reliable event boundaries. Link only
@@ -320,6 +347,12 @@ def structured_records(ep, raw_frames):
                     if i.phase in {"release", "settled"} and relation.predicate in {"on", "inside"}:
                         state.setdefault("target_id", relation.target)
             ids = [evidence[f.frame_index].id]
+            if f.frame_index in inferred_settlements:
+                prior_index = inferred_settlements[f.frame_index]
+                ids.append(evidence[prior_index].id)
+                inferred_bindings.append({"role": "target_id", "entity": state["target_id"],
+                    "observation_ids": ids.copy(), "method": "adjacent_held_to_supported_open_gripper",
+                    "direct_action_observed": False})
             if (i.phase in {"grasp", "transport"} and state.get("held_by") and
                     not state.get("source_id") and not any(s.state.get("held_by") for s in stages)):
                 prior = [p for p in frames if 0 < f.frame_index-p.frame_index <= 3 and
@@ -372,7 +405,9 @@ def structured_records(ep, raw_frames):
                 r.source == i.object_id and r.target == stage.state["target_id"] and
                 r.predicate in {"on", "inside"} and r.confidence >= MIN_CONFIDENCE for r in f.relations):
                 roles.append(RoleBinding(role="destination", entity_id=stage.state["target_id"],
-                    stage_id=stage.id, observation_ids=[evidence[f.frame_index].id], confidence=i.confidence))
+                    stage_id=stage.id, observation_ids=stage.observation_ids,
+                    confidence=i.confidence,
+                    basis="linked" if f.frame_index in inferred_settlements else "observed"))
         payload = {"interaction_id": case, "frame_indices": indices, "entities": identities,
                    "observations": [json.loads(evidence[n].value) for n in indices],
                    "grouping_policy": "same_instance_actor; close_frames_or_same_declared_event_or_open_carry; monotone_phase; same_time_basis; source_from_first_confirmed_hold; mark_unobserved_intervals",

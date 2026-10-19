@@ -120,8 +120,10 @@ def compact_record(record):
     for binding in record.role_bindings:
         key=(binding.role,binding.entity_id)
         item=roles.setdefault(key,{"role":binding.role,"entity_id":binding.entity_id,
-            "confidence":binding.confidence,"observation_ids":[],"stage_ids":[]})
+            "confidence":binding.confidence,"basis":binding.basis,
+            "observation_ids":[],"stage_ids":[]})
         item["confidence"]=min(item["confidence"],binding.confidence)
+        if binding.basis == "linked":item["basis"] = "linked"
         item["observation_ids"].extend(binding.observation_ids)
         if binding.stage_id:item["stage_ids"].append(binding.stage_id)
     for item in roles.values():

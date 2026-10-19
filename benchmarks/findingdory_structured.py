@@ -9,6 +9,7 @@ import argparse
 import base64
 from collections import Counter
 import hashlib
+import inspect
 import json
 from pathlib import Path
 
@@ -18,8 +19,9 @@ from memory_agent.memory import HypergraphMemory
 from memory_agent.models import Answer
 from memory_agent.settings import Settings
 
-from benchmarks.findingdory_memory import (SCHEMA_VERSION, MIN_CONFIDENCE, VisualFrame, VisualBatch,
-    history_query, structured_records, supported_frames, validate_batch)
+from benchmarks.findingdory_memory import (SCHEMA_VERSION, MIN_CONFIDENCE, VisualLabel, Entity,
+    Relation, Interaction, VisualFrame, VisualBatch, history_query, structured_records,
+    supported_frames, validate_batch)
 from benchmarks.findingdory_pilot import goal_indices, load, save, score_frames
 from benchmarks.run_budget import BudgetedClients, RunBudget
 from memory_agent.recall import compact_record, graph_plan, hint_score
@@ -92,6 +94,11 @@ def freeze(path, config):
 
 def caption_config(settings, data):
     manifest = load(data / "manifest.json")
+    # Memory assembly lives in the same module as the visual validator. Hash only
+    # the extraction schema/validation contract so memory-only improvements can
+    # reuse already paid-for observations without silently changing validation.
+    validator_source = "\n".join(inspect.getsource(value) for value in (
+        VisualLabel, Entity, Relation, Interaction, VisualFrame, validate_batch, VisualBatch))
     return {"schema_version": SCHEMA_VERSION, "vision_model": settings.vision_model or settings.llm_model,
             "vision_endpoint": settings.llm_url, "chunk_size": 2, "context_frames": 1,
             "image_detail": "high", "temperature": 0, "max_tokens": 3600,
@@ -101,7 +108,7 @@ def caption_config(settings, data):
             "failure_policy": "two_batch_attempts_then_validated_single_frames; no_transport_retries",
             "retry_feedback_policy": "direct_action_appearance_and_visible_endpoints_v4",
             "prompt_sha256": fingerprint(CAPTION_SYSTEM),
-            "validator_sha256": hashlib.sha256(Path(__file__).with_name("findingdory_memory.py").read_bytes()).hexdigest(),
+            "validator_sha256": hashlib.sha256(validator_source.encode()).hexdigest(),
             "schema_sha256": fingerprint(VisualBatch.model_json_schema()),
             "manifest_sha256": fingerprint(manifest), "min_confidence": MIN_CONFIDENCE}
 
@@ -125,7 +132,8 @@ def strict_schema():
 
 def extract_batch(client, data, ep, indices, previous=(), diagnostic_path=None, *, allow_split=True,
                   max_attempts=3, max_output_tokens=6000, system=None,
-                  max_target_images=2, context_before=1, context_after=0):
+                  max_target_images=2, context_before=1, context_after=0,
+                  normalizer=None):
     if len(indices) > max_target_images:
         raise ValueError("Too many target images per high-detail request")
     registry = {e.id: e.model_dump() for f in previous for e in f.entities}
@@ -193,6 +201,8 @@ def extract_batch(client, data, ep, indices, previous=(), diagnostic_path=None, 
         client.calls[-1]["response_format"] = payload["response_format"]["type"]
         try:
             raw_output = json.loads(response["choices"][0]["message"]["content"])
+            if normalizer is not None:
+                raw_output = normalizer(raw_output, indices, previous)
             parsed = VisualBatch.model_validate(raw_output)
             raw = [f.model_dump(mode="json") for f in parsed.observations]
             return validate_batch(raw, indices, previous)
@@ -217,7 +227,8 @@ def extract_batch(client, data, ep, indices, previous=(), diagnostic_path=None, 
                                         allow_split=False, max_attempts=max_attempts,
                                         max_output_tokens=max_output_tokens, system=system,
                                         max_target_images=max_target_images,
-                                        context_before=context_before, context_after=context_after))
+                                        context_before=context_before, context_after=context_after,
+                                        normalizer=normalizer))
         return validate_batch([f.model_dump(mode="json") for f in frames], indices, previous)
     raise RuntimeError("Visual output failed schema/identity validation: " + (feedback or "unknown"))
 

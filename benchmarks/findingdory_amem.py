@@ -32,7 +32,9 @@ def report(run,tasks,budget):
     save(run/'summary.json',out)
     text=['# 超图记忆与A-Mem对比','',
           '相同192帧共同视觉观测、千问语言及嵌入模型、共同回答提示与图片筛选、Top-K=20、上下文40KB、每题最多12张图。',
-          '双方12题全部重新作答，未复用历史答案。超图复用未变化的持久索引；A-Mem从头构建，每帧一条笔记，分别维护两段历史。','',
+          '双方12题全部重新作答，未复用历史答案。视觉观测复用同一份已校验输入；'+
+          ('超图从观测重新建库。' if load(run/'evaluation_config.json')['hypergraph_index']=='rebuilt' else '超图复用未变化的持久索引。')+
+          'A-Mem每帧一条笔记，分别维护两段历史。','',
           '| 方法 | 正确/已完成 | 第一段 | 第二段 |','|---|---:|---:|---:|']
     for m,v in results.items():text.append(f"| {m} | {v['correct']}/{v['total']} | {v['episodes']['ep_1']}/6 | {v['episodes']['ep_33']}/6 |")
     text.extend(['',f"新增reported tokens：{out['new_tokens']:,}；累计：{budget.state['reported_tokens']:,}；无累计token上限。",
@@ -49,6 +51,7 @@ def main():
     parser.add_argument('--run-dir',type=Path,default=Path('runtime/findingdory_run_20261013_amem'))
     parser.add_argument('--data-dir',type=Path,default=Path('runtime/findingdory'))
     parser.add_argument('--reuse-amem-state',action='store_true',help='Resume verified ingestion snapshots from source-run')
+    parser.add_argument('--rebuild-hypergraph',action='store_true',help='Build a fresh hypergraph index from the shared observations')
     args=parser.parse_args();source,run,data=args.source_run,args.run_dir,args.data_dir
     if run.resolve() in {source.resolve(),data.resolve()}:raise ValueError('Isolated output required')
     if subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()!=REVISION:
@@ -60,8 +63,9 @@ def main():
     hashes=code_hashes()|{p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in (
         'benchmarks/amem_adapter.py','benchmarks/answer_normalization.py','benchmarks/findingdory_visual_answer.py','benchmarks/run_budget.py')}
     if fingerprint(tasks)!=old['task_sha256']:raise ValueError('Tasks changed')
-    for p in ('benchmarks/findingdory_memory.py','src/memory_agent/identity.py','src/memory_agent/models.py','src/memory_agent/semantic.py'):
-        if hashes[p]!=old['code_sha256'][p]:raise ValueError('Hypergraph encoding changed')
+    if not args.rebuild_hypergraph:
+        for p in ('benchmarks/findingdory_memory.py','src/memory_agent/identity.py','src/memory_agent/models.py','src/memory_agent/semantic.py'):
+            if hashes[p]!=old['code_sha256'][p]:raise ValueError('Hypergraph encoding changed')
     audit=source_audit()
     freeze(run/'evaluation_config.json',{'models':models,'source_run':str(source.resolve()),
         'task_sha256':fingerprint(tasks),'observation_sha256':{ep:fingerprint(raw) for ep,raw in shared.items()},
@@ -69,6 +73,7 @@ def main():
         'amem_official':audit,'answer_prompt_sha256':fingerprint(VISUAL_ANSWER_SYSTEM),
         'methods':['hypergraph','amem'],'retrieval_k':20,'context_bytes':40000,'images_per_question':12,
         'ingestion_workers':2,'source_amem_state_resumed':args.reuse_amem_state,
+        'hypergraph_index':'rebuilt' if args.rebuild_hypergraph else 'reused',
         'answers':'all 24 regenerated, common ANY-one normalization and bounded repair',
         'amem_note_unit':'one original observation per note; no query or reference answer',
         'amem_defaults':{'neighbor_k':5,'evolution_threshold':100,'temperature':1.0},
@@ -81,8 +86,10 @@ def main():
         budget.state['carried_usage']={'source_run':str(source.resolve()),'reported_tokens':previous['reported_tokens']}
         budget.state['historical_usage']=previous['historical_usage'];budget.save()
     for ep in shared:
-        for original,dest in ((source/'observations'/f'{ep}.json',run/'observations'/f'{ep}.json'),
-                              (source/'memory'/f'{ep}_hypergraph.sqlite3',run/'memory'/f'{ep}_hypergraph.sqlite3')):
+        transfers=[(source/'observations'/f'{ep}.json',run/'observations'/f'{ep}.json')]
+        if not args.rebuild_hypergraph:
+            transfers.append((source/'memory'/f'{ep}_hypergraph.sqlite3',run/'memory'/f'{ep}_hypergraph.sqlite3'))
+        for original,dest in transfers:
             dest.parent.mkdir(parents=True,exist_ok=True)
             if not dest.exists():shutil.copy2(original,dest)
         if fingerprint(load(run/'observations'/f'{ep}.json'))!=fingerprint(shared[ep]):raise ValueError('Stored input changed')
@@ -91,10 +98,21 @@ def main():
             shutil.copytree(source/'amem'/ep,run/'amem'/ep)
     records={ep:structured_records(ep,raw['observations']) for ep,raw in shared.items()}
     graphs={ep:HypergraphMemory(run/'memory'/f'{ep}_hypergraph.sqlite3') for ep in shared}
+    if args.rebuild_hypergraph:
+        for ep,graph in graphs.items():
+            with graph.connection() as db:
+                existing={row[0] for row in db.execute('SELECT id FROM records')}
+            expected={record.id for record in records[ep]}
+            if not existing:
+                graph.add_many(records[ep])
+            elif existing!=expected:
+                raise ValueError('Partial hypergraph index; use a new run directory')
     namespace=(settings.embedding_url or settings.llm_url).rstrip('/')+'|'+settings.embedding_model
     for graph in graphs.values():
         with graph.connection() as db:
-            if {r[0] for r in db.execute('SELECT DISTINCT provider FROM embedding_cache')}!={namespace}:raise ValueError('Embedding endpoint changed')
+            providers={r[0] for r in db.execute('SELECT DISTINCT provider FROM embedding_cache')}
+            if providers and providers!={namespace}:raise ValueError('Embedding endpoint changed')
+            if not providers and not args.rebuild_hypergraph:raise ValueError('Embedding cache missing')
     client=ComparisonClients(settings,budget);memories={};provenance={}
     try:
         # Create official systems sequentially; provider/retriever initialization

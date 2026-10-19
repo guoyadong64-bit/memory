@@ -49,6 +49,43 @@ def test_single_frame_lift_supports_source_without_certifying_destination():
     assert graph_plan(records,query)["targets"][0]["frame_index"] == 0
 
 
+def test_adjacent_held_object_on_support_recovers_landing_with_provenance():
+    from memory_agent.recall import compact_record
+    held = frame(0, "06:00", "transport",
+                 description="The robot gripper is holding a cup above the desk.")
+    supported = frame(1, "06:01", "settled", interaction=None,
+                      description="The robot gripper is open and the cup rests on the box.",
+                      relations=[{"source":"cup_1", "predicate":"on",
+                                  "target":"box_1", "confidence":.9}])
+    records = structured_records("sample", [held, supported])
+    process = next(r for r in records if r.evolution)
+    assert json.loads(records[1].answer)["interaction"] is None
+    assert process.evolution.stages[-1].phase == "settled"
+    assert not json.loads(process.answer)["coverage"]["event_complete"]
+    assert json.loads(process.answer)["inferred_bindings"][0]["direct_action_observed"] is False
+    assert next(b for b in process.role_bindings if b.role == "destination").basis == "linked"
+    assert next(r for r in compact_record(process)["roles"] if r["role"] == "destination")["basis"] == "linked"
+    query = history_query("Revisit all the receptacles you placed objects on yesterday.", "sample", records)
+    query.recall_plan = RecallPlan(goal="destination", all_targets=True)
+    assert [(t["frame_index"],t["entity_id"]) for t in graph_plan(records,query)["targets"]] == [(1,"box_1")]
+
+
+def test_static_support_or_nonadjacent_frames_do_not_create_a_placement():
+    held = frame(0, "06:00", "transport")
+    supported = frame(1, "06:01", "settled", interaction=None,
+                      description="The cup rests on the box while the robot is elsewhere.",
+                      entities=[e for e in frame()["entities"] if e["id"] != "gripper_1"],
+                      relations=[{"source":"cup_1", "predicate":"on",
+                                  "target":"box_1", "confidence":.9}])
+    assert all(s.phase != "settled" for r in structured_records("sample",[held,supported])
+               if r.evolution for s in r.evolution.stages)
+    supported["frame_index"] = 2
+    supported["entities"].append(frame()["entities"][1])
+    supported["description"] = "The robot gripper is open and the cup rests on the box."
+    assert all(s.phase != "settled" for r in structured_records("sample",[held,supported])
+               if r.evolution for s in r.evolution.stages)
+
+
 @pytest.mark.parametrize("description",[
     "The robot gripper is holding a white cup above the wooden desk.",
     "The robot gripper is not lifting a white cup from the wooden desk.",

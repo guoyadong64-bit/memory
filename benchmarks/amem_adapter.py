@@ -11,6 +11,8 @@ import sqlite3
 import sys
 from types import SimpleNamespace
 
+from memory_agent.clients import ModelError
+
 REPOSITORY='https://github.com/WujiangXu/A-mem-sys'
 REVISION='f303dfc71e07bdc787f4bc135d4cea328ae30e99'
 ROOT=Path(__file__).resolve().parents[1]/'runtime'/'baselines'/'a_mem_sys'
@@ -46,6 +48,9 @@ class CompletionAdapter:
             parsed=json.loads(content)
             if response_format and 'json_schema' in response_format:
                 jsonschema.validate(parsed,response_format['json_schema']['schema'])
+        except ModelError as exc:
+            # ModelError contains only a local status classification, never provider text.
+            raise AMemProviderStop('A-Mem provider request failed: '+str(exc)) from None
         except Exception as exc:
             raise AMemProviderStop('A-Mem provider/structured output failed: '+type(exc).__name__) from None
         cache.parent.mkdir(parents=True,exist_ok=True)

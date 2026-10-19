@@ -23,7 +23,12 @@ class ModelClients:
         self.calls: list[dict] = []
         self.max_requests = max_requests
         self.requests_sent = 0
-        self.http = httpx.Client(timeout=settings.timeout, transport=transport,
+        # A completed connection can still need time for high-detail image inference.
+        # Keep connect/write/pool bounds, but allow a longer response wait for the
+        # live no-retry experiment. Its read timeout is not auto-retried: the
+        # server may already have processed and charged for that request.
+        read_timeout = max(settings.timeout, 180) if settings.mode == "live" and settings.retries == 0 else settings.timeout
+        self.http = httpx.Client(timeout=httpx.Timeout(settings.timeout, read=read_timeout), transport=transport,
                                  follow_redirects=False)
 
     def close(self) -> None:
@@ -38,11 +43,13 @@ class ModelClients:
             try:
                 response = self.http.post(url, headers={"Authorization": f"Bearer {key}"},
                                           json=payload)
-            except httpx.TransportError:
+            except httpx.TransportError as exc:
                 if attempt < self.settings.retries:
                     time.sleep(0.25 * 2 ** attempt)
                     continue
-                raise ModelError(f"{role}: network request failed") from None
+                failure = ModelError(f"{role}: network request failed ({type(exc).__name__})")
+                failure.transport_kind = type(exc).__name__
+                raise failure from None
             if response.status_code in (429, 500, 502, 503, 504, 529):
                 if attempt < self.settings.retries:
                     time.sleep(0.25 * 2 ** attempt)

@@ -423,9 +423,15 @@ class HypergraphMemory:
         local = {(r.key,context_key(r)) for r in candidates if r.scope == "short"}
         candidates = [r for r in candidates if r.scope == "short" or
                       (r.key,context_key(r)) not in local]
+        # A graph search should rank grounded context and joint hyperedge paths
+        # ahead of a merely similar sentence. Flat retrieval keeps its old mix.
+        ranking_weights = ({"semantic": .15, "context": .25, "graph": .60}
+                           if strategy == "hypergraph" else
+                           {"semantic": .55, "context": .30, "graph": .15})
         report = {"strategy":strategy,"semantic_backend":"tfidf","fallback":None,
                   "eligible_count":len(candidates),"filtered":filtered,"scores":{},
-                  "query_plan": query.recall_plan.model_dump(mode="json") if query.recall_plan else None}
+                  "query_plan": query.recall_plan.model_dump(mode="json") if query.recall_plan else None,
+                  "ranking_weights": ranking_weights}
         if not candidates:
             return [],report
         semantic,backend,fallback = self._semantic(query,candidates,embedder,embedding_namespace)
@@ -475,7 +481,9 @@ class HypergraphMemory:
             # Bounded evidence for multi-role co-binding, not a probability or graph degree bonus.
             support = min(1.0,max((len(p["shared_types"])/4 for p in paths),default=0.0))
             graph_support = .5*coverage + .5*support if strategy == "hypergraph" else coverage
-            total = .55*semantic[r.id] + .30*coverage + .15*graph_support
+            total = (ranking_weights["semantic"]*semantic[r.id] +
+                     ranking_weights["context"]*coverage +
+                     ranking_weights["graph"]*graph_support)
             if r.id in planned_ids:
                 total += .45  # executed ordinal/relative evidence outranks mere semantic proximity
             score = self.retrieval_scores(r,query) | {

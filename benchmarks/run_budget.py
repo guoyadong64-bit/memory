@@ -6,6 +6,7 @@ Failed requests still consume the request allowance even if usage is not returne
 from datetime import datetime, timezone
 import json
 from threading import RLock
+import time
 
 from memory_agent.clients import ModelClients
 
@@ -67,7 +68,17 @@ class RunBudget:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_suffix(".tmp")
         temp.write_text(json.dumps(self.state, indent=2) + "\n", encoding="utf-8")
-        temp.replace(self.path)
+        # On Windows, another process briefly reading api_budget.json can make
+        # os.replace raise WinError 5/32. Preserve the same temp file and retry
+        # only the atomic rename; no model request is retried by this path.
+        for attempt in range(50):
+            try:
+                temp.replace(self.path)
+                return
+            except PermissionError:
+                if attempt == 49:
+                    raise
+                time.sleep(0.1)
 
     def begin(self):
         with self._lock:
@@ -103,11 +114,28 @@ class BudgetedClients(ModelClients):
         self.budget = budget
 
     def post(self, url, key, payload, role):
-        self.budget.begin()
-        try:
-            result = super().post(url, key, payload, role)
-        except Exception as exc:
-            self.budget.finish(role, payload["model"], {}, type(exc).__name__)
-            raise
-        self.budget.finish(role, result.get("model", payload["model"]), result.get("usage", {}))
-        return result
+        # Retry at most one ambiguous remote disconnect, plus at most two
+        # connection-establishment failures. Each HTTP attempt receives its own
+        # ledger entry. A server may have processed the disconnected request.
+        remote_replays = 0
+        connect_retries = 0
+        for _ in range(4):
+            self.budget.begin()
+            try:
+                result = super().post(url, key, payload, role)
+            except Exception as exc:
+                kind = getattr(exc, "transport_kind", "")
+                self.budget.finish(role, payload["model"], {},
+                                   type(exc).__name__ + (":" + kind if kind else ""))
+                if self.settings.retries == 0:
+                    if kind == "RemoteProtocolError" and remote_replays < 1:
+                        remote_replays += 1
+                        time.sleep(2)
+                        continue
+                    if kind in {"ConnectError", "ConnectTimeout"} and connect_retries < 2:
+                        connect_retries += 1
+                        time.sleep(2 ** connect_retries)
+                        continue
+                raise
+            self.budget.finish(role, result.get("model", payload["model"]), result.get("usage", {}))
+            return result
