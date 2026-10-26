@@ -1,0 +1,4 @@
+# Dependencies for the pinned MemoryOS source adapter (no local model downloads).
+-r requirements-memory.txt
+numpy==1.26.4
+faiss-cpu==1.8.0.post1

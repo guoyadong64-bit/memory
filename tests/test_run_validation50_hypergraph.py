@@ -34,12 +34,21 @@ def shared_fixture(root):
     return shared
 
 
-@pytest.mark.parametrize("method_name", ["hypergraph", "mem0", "readagent"])
+@pytest.mark.parametrize("method_name", ["hypergraph", "mem0", "readagent", "memorybank", "memoryos", "amem"])
 def test_failure_resume_reuses_paid_responses_and_scores_consistently(workspace_dir, capsys, monkeypatch, method_name):
-    if method_name == "mem0":
+    if method_name == "amem":
+        from benchmarks import run_validation50_amem as tested
+        monkeypatch.setattr(tested, "source_audit", lambda: {"revision": "fake-official-revision"})
+    elif method_name == "mem0":
         from benchmarks import run_validation50_mem0 as tested
     elif method_name == "readagent":
         from benchmarks import run_validation50_readagent as tested
+        monkeypatch.setattr(tested, "official_source", lambda: ({}, {"revision": "fake-official-revision"}))
+    elif method_name == "memorybank":
+        from benchmarks import run_validation50_memorybank as tested
+        monkeypatch.setattr(tested, "official_source", lambda: ({}, {"revision": "fake-official-revision"}))
+    elif method_name == "memoryos":
+        from benchmarks import run_validation50_memoryos as tested
         monkeypatch.setattr(tested, "official_source", lambda: ({}, {"revision": "fake-official-revision"}))
     else:
         tested = runner
